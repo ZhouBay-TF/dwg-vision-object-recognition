@@ -143,3 +143,24 @@ def test_linear_cad_geometry_is_not_invalid_bbox() -> None:
     )
     assert graph["objects"][0]["geometry_mode"] == "linear"
     assert graph["validation"]["summary"]["error"] == 0
+
+
+def test_low_confidence_primitive_semantics_are_not_expanded_to_objects() -> None:
+    scene = _scene()
+    primitive_id = scene["primitives"][0]["primitive_id"]
+    graph = build_scene_graph(
+        scene,
+        {
+            "schema_version": "sympoint_result.v1",
+            "scene_id": "scene_1",
+            "instances": [],
+            "semantic_by_primitive": [{
+                "class_id": 33,
+                "class_name": "curtain wall",
+                "score": 0.03,
+                "primitive_ids": [primitive_id],
+            }],
+        },
+    )
+    assert graph["objects"] == []
+    assert graph["validation"]["issues"] == []

@@ -90,6 +90,7 @@ def test_build_scene_bundle_has_remote_compatible_layout(tmp_path) -> None:
         assert scene_a_s2["height"] == 400
         assert len(scene_a_s2["args"]) == scene_a_manifest["primitive_count"]
         assert set(scene_a_s2["semanticIds"]) == {35}
+        assert set(scene_a_s2["layerIds"]) == {1, 2}
 
 
 def test_block_reference_uses_bbox_proxy_for_sympoint_svg() -> None:

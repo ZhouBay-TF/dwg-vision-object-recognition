@@ -329,8 +329,18 @@ def scene_to_svg(scene: dict[str, Any], output_path: Path) -> Path:
         "viewBox": f"0 0 {width:g} {height:g}",
         "xmlns": "http://www.w3.org/2000/svg",
     })
-    group = ET.SubElement(root, "g")
+    # SymPointV2 uses the SVG group index as a layer feature.  Keeping every
+    # primitive in one group collapses all CAD layers to layerId=1 and causes
+    # a severe train/inference distribution shift.  Create one SVG group per
+    # source CAD layer in first-seen order; annotations are placed in a
+    # separate group after geometry and are ignored by parse_svg_v5.
+    layer_groups: dict[str, ET.Element] = {}
     for primitive in scene["primitives"]:
+        layer_name = str(primitive.get("layer") or "__unlayered__")
+        group = layer_groups.get(layer_name)
+        if group is None:
+            group = ET.SubElement(root, "g", {"data-layer": layer_name})
+            layer_groups[layer_name] = group
         points = primitive["points_local"]
         if primitive["command"] == "circle":
             box = primitive["bbox_local"]
@@ -360,14 +370,17 @@ def scene_to_svg(scene: dict[str, Any], output_path: Path) -> Path:
         # Do not emit fake ground-truth labels.  parse_svg_v5 treats missing
         # semanticId/instanceId as the background/-1 placeholders expected by
         # inference; emitting semanticId=35 would be shifted to class 34.
+    annotation_group: ET.Element | None = None
     for text in scene.get("texts", []):
         if text.get("role") == "dimension":
             continue
+        if annotation_group is None:
+            annotation_group = ET.SubElement(root, "g", {"data-layer": "__annotations__"})
         bbox = _raw_annotation_bbox(text)
         origin = scene["local_to_world"]["origin"]
         position = text.get("position_world") or [(bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0]
         font_size = max(0.1, float(text.get("height") or text.get("style", {}).get("height") or max(1.0, bbox[3] - bbox[1])))
-        label = ET.SubElement(group, "text", {
+        label = ET.SubElement(annotation_group, "text", {
             "x": f"{float(position[0]) - float(origin[0]):g}",
             "y": f"{float(position[1]) - float(origin[1]):g}",
             "font-size": f"{font_size:g}",

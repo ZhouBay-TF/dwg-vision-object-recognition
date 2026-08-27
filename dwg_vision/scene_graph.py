@@ -345,9 +345,21 @@ def build_scene_graph(
             },
         })
 
-    # If a stuff class has no instance prediction, retain primitive-level
-    # semantic candidates instead of dropping walls from the final graph.
+    # If a stuff class has no instance prediction, retain only high-confidence
+    # primitive-level candidates.  The API exposes softmax probabilities here;
+    # expanding every argmax primitive (including ~1/35 background-like
+    # probabilities) creates one fake low-confidence object per line.
     for semantic in sympoint_result.get("semantic_by_primitive") or []:
+        try:
+            class_id = int(semantic.get("class_id"))
+        except (TypeError, ValueError):
+            class_id = -1
+        score = float(semantic.get("score", 0.0) or 0.0)
+        # SymPointV2 IDs 30-34 are the stuff classes.  Thing classes must be
+        # represented by model instances so that one symbol is not split into
+        # one object per primitive.
+        if class_id < 30 or score < REVIEW_CONFIDENCE_THRESHOLD:
+            continue
         semantic_ids = _primitive_ids(semantic, scene)
         primitive_id = semantic_ids[0] if semantic_ids else ""
         if not primitive_id or primitive_id in used_primitive_ids or primitive_id not in primitive_lookup:
@@ -369,8 +381,8 @@ def build_scene_graph(
             "source_handles": [str(primitive.get("handle"))] if primitive.get("handle") else [],
             "source_entity_ids": [str(primitive.get("source_entity_id"))],
             "primitive_ids": [primitive_id],
-            "confidence": max(0.0, min(1.0, float(semantic.get("score", 0.0) or 0.0))),
-            "status": "review" if float(semantic.get("score", 0.0) or 0.0) < REVIEW_CONFIDENCE_THRESHOLD else "confirmed",
+            "confidence": max(0.0, min(1.0, score)),
+            "status": "confirmed",
             "semantic_source": "sympointv2_primitive",
             "evidence_refs": [primitive_id],
             "evidence": {"sympoint_class": class_name, "nearby_text": [], "visual_observations": [], "conflicts": []},
