@@ -7,9 +7,10 @@ evidence and may only suggest semantic fields for existing object IDs.
 """
 
 import json
-import os
 import re
 from typing import Any, Protocol
+
+from .env_config import env_first
 
 
 FUSION_SCHEMA: dict[str, Any] = {
@@ -60,17 +61,17 @@ class DeepSeekFusionProvider:
     name = "deepseek"
 
     def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
-        selected_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        selected_key = api_key or env_first("DEEPSEEK_API_KEY", "deepseek")
         if not selected_key:
             raise RuntimeError("DEEPSEEK_API_KEY 未配置，无法启用 LLM Scene Graph 融合")
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("LLM 融合需要安装 openai") from exc
-        self.model = model or os.getenv("DEEPSEEK_FUSION_MODEL", "deepseek-v4-pro")
+        self.model = model or env_first("DEEPSEEK_FUSION_MODEL", "DEEPSEEK_MODEL", default="deepseek-v4-pro")
         self._client = OpenAI(
             api_key=selected_key,
-            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            base_url=env_first("DEEPSEEK_BASE_URL", default="https://api.deepseek.com"),
         )
 
     def fuse(self, evidence: dict[str, Any]) -> dict[str, Any]:

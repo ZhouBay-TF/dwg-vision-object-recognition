@@ -22,7 +22,7 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-复制 `.env.example` 为 `.env`，填入环境变量。不要把 key 写入 Python 文件或命令历史。Ark 适配器需要 `ARK_VISION_MODEL` 为 Ark 上可用的视觉理解模型；你给出的 `doubao-seedream-5-0-pro-260628` 是图片生成模型，不能直接作为检测 JSON 模型，因此只记录为可选的 `ARK_IMAGE_MODEL`，不会被误用于识别。
+复制 `.env.example` 为 `.env`，填入环境变量。不要把 key 写入 Python 文件或命令历史。Ark 适配器需要 `ARK_VISION_MODEL` 为 Ark 上可用的视觉理解模型；也兼容读取 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 这组 OpenCode/兼容接口变量（以及现有的 `huoshanfnagzhou` 旧 key 名）。`ANTHROPIC_MODEL` 必须实际支持图片输入和 JSON 输出；`doubao-seedream-5-0-pro-260628` 是图片生成模型，不能直接作为检测 JSON 模型，因此只记录为可选的 `ARK_IMAGE_MODEL`，不会被误用于识别。
 
 当前主架构的入口是 `full`。如果已经有 AutoCAD 导出的 `dwg_raw.v1`，先离线验证：
 

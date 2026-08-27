@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Protocol
+
+from .env_config import env_first
 
 
 DETECTION_SCHEMA: dict[str, Any] = {
@@ -162,26 +163,32 @@ class _OpenAICompatibleVision:
 class DeepSeekVisionProvider(_OpenAICompatibleVision):
     def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
         super().__init__(
-            api_key=api_key or os.getenv("DEEPSEEK_API_KEY"),
-            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-            model=model or os.getenv("DEEPSEEK_VISION_MODEL", "deepseek-v4-flash-vision-exp"),
+            api_key=api_key or env_first("DEEPSEEK_API_KEY", "deepseek"),
+            base_url=env_first("DEEPSEEK_BASE_URL", default="https://api.deepseek.com"),
+            model=model or env_first("DEEPSEEK_VISION_MODEL", "DEEPSEEK_MODEL", default="deepseek-v4-flash-vision-exp"),
             name="deepseek",
         )
 
 
 class ArkVisionProvider(_OpenAICompatibleVision):
     def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
-        selected_model = model or os.getenv("ARK_VISION_MODEL", "")
+        # ANTHROPIC_* is the compatibility naming used by some OpenCode/Ark
+        # configurations. ARK_* remains the documented project contract.
+        selected_model = model or env_first("ARK_VISION_MODEL", "ANTHROPIC_MODEL")
         if not selected_model:
-            raise RuntimeError("ARK_VISION_MODEL 未配置；请填入 Ark 上可用的视觉理解模型")
+            raise RuntimeError("ARK_VISION_MODEL/ANTHROPIC_MODEL 未配置；请填入 Ark 上可用的视觉理解模型")
         if "seedream" in selected_model.lower():
             raise RuntimeError(
                 "ARK_VISION_MODEL 当前配置为 Seedream 图片生成模型；它不能可靠返回检测 JSON。"
                 "请将 ARK_VISION_MODEL 设置为 Ark 上可用的视觉理解模型，Seedream 仅作为可选增强/编辑模型。"
             )
         super().__init__(
-            api_key=api_key or os.getenv("ARK_API_KEY"),
-            base_url=os.getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
+            api_key=api_key or env_first("ARK_API_KEY", "ANTHROPIC_AUTH_TOKEN", "huoshanfnagzhou"),
+            base_url=env_first(
+                "ARK_BASE_URL",
+                "ANTHROPIC_BASE_URL",
+                default="https://ark.cn-beijing.volces.com/api/v3",
+            ),
             model=selected_model,
             name="ark",
         )

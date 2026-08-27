@@ -45,7 +45,11 @@ def build_providers(names: Iterable[str]) -> list[VisionProvider]:
         except RuntimeError as exc:
             errors.append(f"{name}: {exc}")
     if not providers:
-        raise RuntimeError("没有可用的视觉提供商。配置 DEEPSEEK_API_KEY/ARK_API_KEY，或使用 --providers offline。\n" + "\n".join(errors))
+        raise RuntimeError(
+            "没有可用的视觉提供商。配置 DEEPSEEK_API_KEY/ARK_API_KEY（兼容读取 deepseek、"
+            "ANTHROPIC_AUTH_TOKEN、ANTHROPIC_BASE_URL、ANTHROPIC_MODEL），或使用 --vision-providers offline。\n"
+            + "\n".join(errors)
+        )
     return providers
 
 
