@@ -15,6 +15,7 @@ from .render import prepare_visual_source, render_svg_to_png
 from .scene import build_scene_bundle
 from .scene_graph import build_scene_graph
 from .sympoint_client import SymPointRemoteClient
+from .sympoint_audit import audit_sympoint_input, audit_sympoint_output
 from .visual_review_agent import VisualReviewAgent
 from .llm_fusion import DeepSeekFusionProvider, apply_fusion_decisions
 from .comparison import generate_scene_comparison, write_run_report
@@ -193,6 +194,7 @@ def run_full_pipeline(
     bundle_dir = output_dir / "bundle"
     bundle_path = build_scene_bundle(raw, bundle_dir, source_path=input_path, job_id=selected_job_id)
     manifest = _load_json(bundle_dir / "job_manifest.json")
+    sympoint_audit: dict[str, dict[str, Any]] = {}
 
     # Render every Scene before model calls.  The Scene image is already
     # cropped to one drawing frame, so the first vision call can establish a
@@ -212,6 +214,10 @@ def run_full_pipeline(
     for scene_item in manifest["scenes"]:
         scene_dir = bundle_dir / scene_item["path"]
         scene = _load_json(scene_dir / "scene.json")
+        scene_s2 = _load_json(scene_dir / "scene_s2.json")
+        sympoint_audit[scene["scene_id"]] = {
+            "input": audit_sympoint_input(scene, scene_s2),
+        }
         scene_render_path, scene_render_manifest, scene_render_error = _render_scene_context(
             scene_dir,
             scene,
@@ -313,6 +319,7 @@ def run_full_pipeline(
         sympoint_result = scene_results.get(scene["scene_id"])
         if sympoint_result is None:
             raise RuntimeError(f"SymPointV2 result missing for Scene {scene['scene_id']}")
+        sympoint_audit[scene["scene_id"]]["output"] = audit_sympoint_output(scene, sympoint_result)
         scene_overview = scene_overviews.get(scene["scene_id"])
         graph_seed = build_scene_graph(
             scene,
@@ -407,6 +414,7 @@ def run_full_pipeline(
         "coordinate_space": "world",
         "bundle": {"path": str(bundle_path), "manifest": manifest},
         "remote_sympoint": remote_metadata,
+        "sympoint_audit": sympoint_audit,
         "render": {
             "path": str(render_path) if render_path else None,
             "manifest": render_manifest,

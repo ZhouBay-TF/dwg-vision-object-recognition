@@ -568,6 +568,7 @@ def write_run_report(
             "world_bounds": (raw.get("coordinate_system") or {}).get("world_bounds") or raw.get("world_bounds"),
         },
         "sympoint": result.get("remote_sympoint"),
+        "sympoint_audit": result.get("sympoint_audit"),
         "visual_review": result.get("visual_review"),
         "scenes": comparisons,
         "validation": result.get("validation"),
