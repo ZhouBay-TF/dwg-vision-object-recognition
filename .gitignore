@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+runs/
+*.dwg
+*.dxf
+*.bak
+*.sv$.dwg
+runs/gemini_edit/
+autocad_2026/bin/
+autocad_2026/obj/

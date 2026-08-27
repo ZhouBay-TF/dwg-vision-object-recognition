@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- AutoCAD 2027 assemblies require .NET 10; AutoCAD 2026 normally uses .NET 8. -->
+    <AutoCADInstallDir Condition="'$(AutoCADInstallDir)' == '' and Exists('D:\Program Files\Autodesk\AutoCAD 2027\AcDbMgd.dll')">D:\Program Files\Autodesk\AutoCAD 2027</AutoCADInstallDir>
+    <!-- Keep the old property name accepted by existing build commands. -->
+    <AutoCADInstallDir Condition="'$(AutoCADInstallDir)' == '' and '$(AutoCAD2026Dir)' != ''">$(AutoCAD2026Dir)</AutoCADInstallDir>
+    <AutoCADInstallDir Condition="'$(AutoCADInstallDir)' == '' and Exists('C:\Program Files\Autodesk\AutoCAD 2026\AcDbMgd.dll')">C:\Program Files\Autodesk\AutoCAD 2026</AutoCADInstallDir>
+    <AutoCADInstallDir Condition="'$(AutoCADInstallDir)' == ''">C:\Program Files\Autodesk\AutoCAD 2026</AutoCADInstallDir>
+    <AutoCADTargetFramework Condition="'$(AutoCADTargetFramework)' == '' and '$(AutoCADInstallDir)' == 'D:\Program Files\Autodesk\AutoCAD 2027'">net10.0-windows</AutoCADTargetFramework>
+    <AutoCADTargetFramework Condition="'$(AutoCADTargetFramework)' == ''">net8.0-windows</AutoCADTargetFramework>
+    <TargetFramework>$(AutoCADTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="AcMgd" HintPath="$(AutoCADInstallDir)\AcMgd.dll" Private="false" />
+    <Reference Include="AcDbMgd" HintPath="$(AutoCADInstallDir)\AcDbMgd.dll" Private="false" />
+    <Reference Include="AcCoreMgd" HintPath="$(AutoCADInstallDir)\AcCoreMgd.dll" Private="false" />
+  </ItemGroup>
+</Project>
