@@ -3,7 +3,7 @@ from __future__ import annotations
 from dwg_vision.llm_fusion import DeepSeekFusionProvider, apply_fusion_decisions
 
 
-def test_deepseek_fusion_enables_reasoning_without_persisting_chain(monkeypatch) -> None:
+def test_deepseek_fusion_defaults_to_parseable_structured_output(monkeypatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
     monkeypatch.setenv("DEEPSEEK_FUSION_MODEL", "deepseek-v4-pro")
     provider = DeepSeekFusionProvider()
@@ -28,7 +28,7 @@ def test_deepseek_fusion_enables_reasoning_without_persisting_chain(monkeypatch)
     assert result["notes"] == "structured result"
     assert calls["model"] == "deepseek-v4-pro"
     assert calls["reasoning_effort"] == "high"
-    assert calls["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert calls["extra_body"] == {"thinking": {"type": "disabled"}}
     assert "reasoning_content" not in result
 
 

@@ -106,7 +106,12 @@ class DeepSeekFusionProvider:
         reasoning_effort = env_first("DEEPSEEK_REASONING_EFFORT", default="high").strip()
         if reasoning_effort:
             request["reasoning_effort"] = reasoning_effort
-        thinking_type = env_first("DEEPSEEK_THINKING", default="enabled").strip().lower()
+        # Structured Scene Graph fusion prioritizes a parseable final JSON.
+        # Keep it independent from the general conversational/visual
+        # thinking switch: enabling long reasoning can leave the structured
+        # content channel empty on some DeepSeek deployments.  Operators can
+        # opt in explicitly with DEEPSEEK_FUSION_THINKING=enabled.
+        thinking_type = env_first("DEEPSEEK_FUSION_THINKING", default="disabled").strip().lower()
         if thinking_type in {"enabled", "disabled"}:
             request["extra_body"] = {"thinking": {"type": thinking_type}}
         # DeepSeek may return a separate reasoning_content field. It is
