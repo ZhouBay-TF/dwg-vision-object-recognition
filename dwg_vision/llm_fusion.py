@@ -69,9 +69,15 @@ class DeepSeekFusionProvider:
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("LLM 融合需要安装 openai") from exc
         self.model = model or env_first("DEEPSEEK_FUSION_MODEL", "DEEPSEEK_MODEL", default="deepseek-v4-pro")
+        try:
+            timeout_s = float(env_first("VISION_REQUEST_TIMEOUT_S", default="120"))
+        except ValueError:
+            timeout_s = 120.0
         self._client = OpenAI(
             api_key=selected_key,
             base_url=env_first("DEEPSEEK_BASE_URL", default="https://api.deepseek.com"),
+            timeout=max(1.0, timeout_s),
+            max_retries=0,
         )
 
     def fuse(self, evidence: dict[str, Any]) -> dict[str, Any]:

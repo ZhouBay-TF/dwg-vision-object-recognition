@@ -136,7 +136,17 @@ class _OpenAICompatibleVision:
             raise RuntimeError("模型调用需要安装 openai") from exc
         self.name = name
         self.model = model
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        try:
+            timeout_s = float(env_first("VISION_REQUEST_TIMEOUT_S", default="120"))
+        except ValueError:
+            timeout_s = 120.0
+        self.request_timeout_s = max(1.0, timeout_s)
+        self._client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=self.request_timeout_s,
+            max_retries=0,
+        )
 
     def analyze(self, image_path: Path, prompt: str) -> dict[str, Any]:
         response = self._client.chat.completions.create(
