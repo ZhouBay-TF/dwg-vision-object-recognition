@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from dwg_vision.providers import ArkVisionProvider, DeepSeekVisionProvider
+import base64
+import io
+
+from PIL import Image
+
+from dwg_vision.providers import ArkVisionProvider, DeepSeekVisionProvider, _image_data_url
 
 
 def test_ark_provider_reads_anthropic_compatible_aliases(monkeypatch) -> None:
@@ -38,3 +43,15 @@ def test_provider_request_timeout_is_configurable(monkeypatch) -> None:
     assert provider.request_timeout_s == 45.0
     assert provider._client.timeout == 45.0
     assert provider._client.max_retries == 0
+
+
+def test_vision_payload_downscales_cad_render_in_memory(tmp_path, monkeypatch) -> None:
+    source_path = tmp_path / "large.png"
+    Image.new("RGB", (4759, 2703), "white").save(source_path)
+    monkeypatch.setenv("VISION_MAX_IMAGE_DIM", "1600")
+
+    data_url = _image_data_url(source_path)
+    encoded = data_url.split(",", 1)[1]
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as image:
+        assert image.size == (1600, 909)
+        assert data_url.startswith("data:image/jpeg;base64,")

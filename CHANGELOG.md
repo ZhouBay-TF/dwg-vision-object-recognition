@@ -12,6 +12,7 @@
 - 根据已验证的 Ark Chat Completions 示例，将视觉模型配置为 `doubao-seed-2-1-pro-260628`；DeepSeek Scene Graph 融合支持 `reasoning_effort` 和 `thinking` 参数，但不落盘 `reasoning_content`。
 - Ark/DeepSeek 客户端增加可配置的 `VISION_REQUEST_TIMEOUT_S`（默认 120 秒），避免单次模型请求异常导致整条 DWG 流程无限等待。
 - 禁用 OpenAI SDK 默认自动重试；单次请求现在严格受超时和 Agent 场景预算控制，失败会进入审计 trace，不会隐式放大调用次数。
+- 针对 Ark 视觉接口增加 CAD 图像载荷预处理：模型请求前默认在内存中缩放到最长边 1600 像素、转 JPEG 质量 85 并设置 `detail=high`，原始对比图保持无损保留。
 
 ## 2026-08-26
 

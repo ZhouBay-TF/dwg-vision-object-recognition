@@ -3,6 +3,7 @@ from __future__ import annotations
 """Vision provider adapters and a deterministic offline provider for tests."""
 
 import base64
+import io
 import json
 import re
 from pathlib import Path
@@ -50,16 +51,32 @@ class VisionProvider(Protocol):
 
 
 def _image_data_url(path: Path) -> str:
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    mime = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-        ".bmp": "image/bmp",
-        ".tif": "image/tiff",
-        ".tiff": "image/tiff",
-    }.get(path.suffix.lower(), "image/png")
-    return f"data:{mime};base64,{encoded}"
+    """Encode a model image without sending the huge CAD render dimensions.
+
+    CAD renders are often several thousand pixels wide while containing very
+    little raster data. Sending those dimensions through a data URL makes
+    Ark vision requests unnecessarily slow. The original render remains on
+    disk for visual comparison; only the in-memory model payload is resized.
+    """
+
+    try:
+        from PIL import Image
+
+        max_dimension_text = env_first("VISION_MAX_IMAGE_DIM", default="1600")
+        try:
+            max_dimension = max(256, int(max_dimension_text))
+        except ValueError:
+            max_dimension = 1600
+        with Image.open(path) as source:
+            image = source.convert("RGB")
+            image.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=85, optimize=True)
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/jpeg;base64,{encoded}"
+    except ImportError:  # pragma: no cover
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
 
 
 def _response_text(response: Any) -> str:
@@ -162,7 +179,10 @@ class _OpenAICompatibleVision:
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": _image_data_url(image_path)}},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": _image_data_url(image_path), "detail": "high"},
+                        },
                     ],
                 },
             ],
