@@ -22,7 +22,7 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-复制 `.env.example` 为 `.env`，填入环境变量。不要把 key 写入 Python 文件或命令历史。Ark 适配器需要 `ARK_VISION_MODEL` 为 Ark 上可用的视觉理解模型；也兼容读取 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 这组 OpenCode/兼容接口变量（以及现有的 `huoshanfnagzhou` 旧 key 名）。`ANTHROPIC_MODEL` 必须实际支持图片输入和 JSON 输出；`doubao-seedream-5-0-pro-260628` 是图片生成模型，不能直接作为检测 JSON 模型，因此只记录为可选的 `ARK_IMAGE_MODEL`，不会被误用于识别。
+复制 `.env.example` 为 `.env`，填入环境变量。不要把 key 写入 Python 文件或命令历史。当前已验证可接收图片的 Ark 模型为 `doubao-seed-2-1-pro-260628`，接口基址使用 `https://ark.cn-beijing.volces.com/api/v3`。适配器也兼容读取 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 这组 OpenCode/兼容接口变量（以及现有的 `huoshanfnagzhou` 旧 key 名）；如果使用兼容变量，`ANTHROPIC_MODEL` 必须设置为实际支持图片输入和 JSON 输出的模型。`doubao-seedream-5-0-pro-260628` 是图片生成模型，不能直接作为检测 JSON 模型，因此只记录为可选的 `ARK_IMAGE_MODEL`，不会被误用于识别。DeepSeek `deepseek-v4-pro` 用于可选的 Scene Graph 证据融合，默认按 API 示例启用 reasoning；系统只保存最终 JSON 和简短审计 notes，不保存隐藏思维链。
 
 当前主架构的入口是 `full`。如果已经有 AutoCAD 导出的 `dwg_raw.v1`，先离线验证：
 

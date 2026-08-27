@@ -9,6 +9,7 @@
 - 低于 0.45 的 SymPointV2 候选统一标记为 `review`，不再显示为 `confirmed`；原生直接设备文字仍可按文字优先规则提升候选可信度。
 - 真实 `平面深化.dwg` 通过本机端口完成一次远程 SymPointV2 推理；产物见 `runs/real_case_remote_review/`，本次验证基线为 `22 passed`。
 - 视觉 Provider 增加环境变量兼容层：标准 `ARK_*`/`DEEPSEEK_*` 优先，同时兼容 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 以及现有 `deepseek`/`huoshanfnagzhou` 旧 key 名；新增 2 项回归测试，完整测试基线为 `26 passed`。
+- 根据已验证的 Ark Chat Completions 示例，将视觉模型配置为 `doubao-seed-2-1-pro-260628`；DeepSeek Scene Graph 融合支持 `reasoning_effort` 和 `thinking` 参数，但不落盘 `reasoning_content`。
 
 ## 2026-08-26
 

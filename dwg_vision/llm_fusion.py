@@ -88,15 +88,25 @@ class DeepSeekFusionProvider:
 5. 不输出思维链，只输出简短 notes 和 JSON。
 
 严格返回：{{"decisions": [...], "notes": "..."}}"""
-        response = self._client.chat.completions.create(
-            model=self.model,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
+        request: dict[str, Any] = {
+            "model": self.model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
                 {"role": "system", "content": "你是严谨的 CAD 结构化证据融合器。"},
                 {"role": "user", "content": prompt},
             ],
-        )
+        }
+        reasoning_effort = env_first("DEEPSEEK_REASONING_EFFORT", default="high").strip()
+        if reasoning_effort:
+            request["reasoning_effort"] = reasoning_effort
+        thinking_type = env_first("DEEPSEEK_THINKING", default="enabled").strip().lower()
+        if thinking_type in {"enabled", "disabled"}:
+            request["extra_body"] = {"thinking": {"type": thinking_type}}
+        # DeepSeek may return a separate reasoning_content field. It is
+        # intentionally not persisted; only the final structured JSON and
+        # short audit notes are accepted by this module.
+        response = self._client.chat.completions.create(**request)
         choices = getattr(response, "choices", None) or []
         if not choices:
             raise RuntimeError("LLM fusion returned no choices")

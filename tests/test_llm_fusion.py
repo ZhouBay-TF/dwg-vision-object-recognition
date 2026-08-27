@@ -1,6 +1,35 @@
 from __future__ import annotations
 
-from dwg_vision.llm_fusion import apply_fusion_decisions
+from dwg_vision.llm_fusion import DeepSeekFusionProvider, apply_fusion_decisions
+
+
+def test_deepseek_fusion_enables_reasoning_without_persisting_chain(monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-test-key")
+    monkeypatch.setenv("DEEPSEEK_FUSION_MODEL", "deepseek-v4-pro")
+    provider = DeepSeekFusionProvider()
+    calls = {}
+
+    class Message:
+        content = '{"decisions": [], "notes": "structured result"}'
+
+    class Choice:
+        message = Message()
+
+    class Response:
+        choices = [Choice()]
+
+    def fake_create(**kwargs):
+        calls.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(provider._client.chat.completions, "create", fake_create)
+    result = provider.fuse({"objects": []})
+
+    assert result["notes"] == "structured result"
+    assert calls["model"] == "deepseek-v4-pro"
+    assert calls["reasoning_effort"] == "high"
+    assert calls["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert "reasoning_content" not in result
 
 
 def test_llm_fusion_cannot_mutate_geometry_or_override_text() -> None:
