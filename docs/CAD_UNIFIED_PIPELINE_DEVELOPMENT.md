@@ -519,6 +519,8 @@ python -m dwg_vision.cli full `
 
 `full` 生成的主要文件是 `dwg_raw.json`、`bundle/job_bundle.zip`、每个 Scene 的 `scene.json/scene.svg`、`sympoint_result.json`、每个 Scene 的可选 `scene_overview.json`、`visual_review_trace.json`、每个 Scene 的视觉栅格、`comparison/<scene_id>/` 对比图、`run_report.json` 和最终 `detection.json`。视觉栅格优先从 Scene SVG 生成，因此多个图框不会共用错误的全图坐标；原始 DWG 渲染器可作为额外审计产物。DIMENSION 仍进入原生文字证据与校验，但默认不绘入视觉底图，防止标注尺寸遮挡对象。
 
+视觉模型图片传输约定：Ark 生产默认使用 `ARK_VISION_TRANSPORT=responses_file`，将本地 Scene/ROI 图片经 Files API 上传后，通过 Responses API 的 `input_image.file_id` 传入；超过 `VISION_MAX_IMAGE_DIM` 的图片仅在临时目录中缩放为 JPEG，原始图不改写。当前 Ark Files API 的 `purpose` 默认是 `user_data`，可由 `ARK_FILE_PURPOSE` 覆盖。只有在接口排障或兼容旧部署时才使用 `ARK_VISION_TRANSPORT=chat_base64`。Files API 的上传和 Responses API 的图片引用由 `dwg_vision.providers.ArkVisionProvider` 封装，Agent、Scene Graph 和下游融合模块只看到统一的 `dict` 结果，不感知传输方式。
+
 #### SymPointV2 的 Scene 裁剪与 SVG→JSON
 
 SymPointV2 不接收整张 DWG 的总 SVG。AutoCAD 原生解析得到图框后，`SceneBuilder` 对每个图框建立独立的局部坐标系，并只把该图框内的几何写入：

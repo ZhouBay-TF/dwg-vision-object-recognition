@@ -452,6 +452,25 @@ SymPointV2 输出保持几何事实和模型类别分离：
 }
 ```
 
+### 5.7.1 Ark 图片传输契约
+
+Ark 视觉调用默认采用官方推荐的本地文件路径方式，而不是把大尺寸 CAD PNG 直接拼进 Base64 请求：
+
+```text
+Scene/ROI PNG
+  -> 本地模型载荷预处理（最长边 VISION_MAX_IMAGE_DIM，默认 1600；原图不修改）
+  -> Ark Files API（purpose=user_data）
+  -> file_id
+  -> Ark Responses API
+       input[].content[] = input_image(file_id) + input_text(prompt)
+  -> output_text
+  -> 严格 JSON 解析
+```
+
+适配器使用 `ARK_VISION_TRANSPORT=responses_file` 选择这条路径，并使用 `ARK_VISION_MODEL`、`ARK_BASE_URL` 和 `ARK_API_KEY`。当前 Ark Files API 的 `purpose` 使用 `user_data`（也可通过 `ARK_FILE_PURPOSE` 配置为部署允许的其它值）。Responses 请求中的图片块必须是 `input_image`，并通过 `file_id` 引用上传文件；不能把 Chat API 的 `image_url` 字段原样复用到 Responses 请求。模型只返回 `detections` 和简短 `notes`，不返回隐藏思维链，也不把 API key 或 `file_id` 写入最终 `detection.json`。
+
+为控制 CAD 大图上传延迟，只有超过配置最长边的图片才会在临时目录生成 JPEG；上传结束后临时文件自动删除，原始 Scene/ROI 栅格和对比图仍完整保存在运行目录。需要排查 Responses 接口时，可以设置 `ARK_VISION_TRANSPORT=chat_base64` 回到兼容 Chat API，但这不是生产默认路径。
+
 ### 5.8 受限视觉复核 Agent
 
 视觉模型对裁剪位置和上下文敏感，因此视觉分支允许多次调用。但多次调用必须由固定状态机和预算控制，不能演变为全局自由 Agent。

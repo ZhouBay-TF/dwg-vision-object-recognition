@@ -22,7 +22,7 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-复制 `.env.example` 为 `.env`，填入环境变量。不要把 key 写入 Python 文件或命令历史。当前已验证可接收图片的 Ark 模型为 `doubao-seed-evolving`，接口基址使用 `https://ark.cn-beijing.volces.com/api/v3`。适配器也兼容读取 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 这组 OpenCode/兼容接口变量（以及现有的 `huoshanfnagzhou` 旧 key 名）；如果使用兼容变量，`ANTHROPIC_MODEL` 必须设置为实际支持图片输入和 JSON 输出的模型。`doubao-seedream-5-0-pro-260628` 是图片生成模型，不能直接作为检测 JSON 模型，因此只记录为可选的 `ARK_IMAGE_MODEL`，不会被误用于识别。发送给视觉模型前，程序默认将高分辨率 CAD 图像在内存中压缩为最长边 1600 像素并设置 `detail=high`；原始渲染图不会改变。DeepSeek `deepseek-v4-pro` 用于可选的 Scene Graph 证据融合，默认按 API 示例启用 reasoning；系统只保存最终 JSON 和简短审计 notes，不保存隐藏思维链。
+复制 `.env.example` 为 `.env`，填入环境变量。不要把 key 写入 Python 文件或命令历史。当前已验证可接收图片的 Ark 模型为 `doubao-seed-evolving`，接口基址使用 `https://ark.cn-beijing.volces.com/api/v3`。适配器也兼容读取 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 这组 OpenCode/兼容接口变量（以及现有的 `huoshanfnagzhou` 旧 key 名）；如果使用兼容变量，`ANTHROPIC_MODEL` 必须设置为实际支持图片输入和 JSON 输出的模型。`doubao-seedream-5-0-pro-260628` 是图片生成模型，不能直接作为检测 JSON 模型，因此只记录为可选的 `ARK_IMAGE_MODEL`，不会被误用于识别。Ark 视觉默认采用官方推荐的本地文件路径链路：先通过 Files API 上传本地准备图，再用 Responses API 的 `input_image.file_id` 分析；最长边超过 `VISION_MAX_IMAGE_DIM` 时只生成临时 JPEG，原始渲染图不会改变。需要排查 Responses 接口时才设置 `ARK_VISION_TRANSPORT=chat_base64`。DeepSeek `deepseek-v4-pro` 用于可选的 Scene Graph 证据融合，默认按 API 示例启用 reasoning；系统只保存最终 JSON 和简短审计 notes，不保存隐藏思维链。
 
 当前主架构的入口是 `full`。如果已经有 AutoCAD 导出的 `dwg_raw.v1`，先离线验证：
 
@@ -47,6 +47,24 @@ python -m dwg_vision.cli full `
 ```
 
 `full` 会对每个 Scene 的高清图先调用一次全图视觉概览，再只调用一次 SymPointV2；发送给云端的不是整张 DWG 总图，而是已经按图框裁剪、转换到 Scene-local 坐标的 `scene.svg`。本地会用 `parse_svg_v5` 生成 `scene_s2.json` 做发送前校验，云端再用 `tools/parse_svg_v5.py` 重新生成模型输入。概览之后的视觉复核只在固定 ROI 和预算内多次调用。云端不可用时会保留原生解析和本地分类几何，并在 `detection.json.remote_sympoint` 标记 `degraded_local_fallback`，不会静默伪装成云端成功。
+
+Ark 本地文件视觉调用的最小配置：
+
+```powershell
+$env:ARK_VISION_MODEL = "doubao-seed-evolving"
+$env:ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+$env:ARK_VISION_TRANSPORT = "responses_file"
+$env:ARK_FILE_PURPOSE = "user_data"
+python -m dwg_vision.cli full `
+  --input ".\plan.dwg" `
+  --raw-json ".\dwg_raw.json" `
+  --output-dir ".\runs\ark_file_test" `
+  --sympoint-mode offline `
+  --run-vision `
+  --vision-providers ark
+```
+
+上传的文件只在本次视觉请求中作为输入引用；程序不把 `file_id` 或图片内容写入最终 `detection.json`。如果调用失败，`visual_review_trace.json` 会记录失败状态和本地图片路径，主链路仍保留 AutoCAD、原生文字和 SymPointV2 结果。
 
 历史兼容的整图视觉 POC（不是当前 DWG 主架构）：
 

@@ -6,6 +6,8 @@ import base64
 import io
 import json
 import re
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -79,7 +81,66 @@ def _image_data_url(path: Path) -> str:
         return f"data:image/png;base64,{encoded}"
 
 
+def _max_image_dimension() -> int:
+    max_dimension_text = env_first("VISION_MAX_IMAGE_DIM", default="1600")
+    try:
+        return max(256, int(max_dimension_text))
+    except ValueError:
+        return 1600
+
+
+@contextmanager
+def _prepared_local_image(path: Path):
+    """Yield a local image path suitable for Ark Files API upload.
+
+    Ark can resize a local file on the server, but normalizing oversized CAD
+    renders locally keeps the upload and visual-token cost bounded. The
+    original render is never modified. Small images are yielded unchanged so
+    the SDK receives the user's local path directly.
+    """
+
+    try:
+        from PIL import Image
+    except ImportError:  # pragma: no cover
+        yield path
+        return
+
+    with Image.open(path) as source:
+        if max(source.size) <= _max_image_dimension():
+            yield path
+            return
+
+        image = source.convert("RGB")
+        image.thumbnail((_max_image_dimension(), _max_image_dimension()), Image.Resampling.LANCZOS)
+        with tempfile.TemporaryDirectory(prefix="dwgllm_ark_image_") as temp_dir:
+            prepared_path = Path(temp_dir) / f"{path.stem}.jpg"
+            image.save(prepared_path, format="JPEG", quality=85, optimize=True)
+            image.close()
+            yield prepared_path
+
+
 def _response_text(response: Any) -> str:
+    # Responses API exposes the convenient output_text property. Keep the
+    # Chat Completions path below for DeepSeek and the configurable fallback.
+    output_text = getattr(response, "output_text", None)
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+
+    output = getattr(response, "output", None) or []
+    if output:
+        parts: list[str] = []
+        for item in output:
+            content = item.get("content", []) if isinstance(item, dict) else getattr(item, "content", [])
+            for content_item in content or []:
+                if isinstance(content_item, dict):
+                    text = content_item.get("text") or content_item.get("content") or ""
+                else:
+                    text = getattr(content_item, "text", "") or getattr(content_item, "content", "")
+                if text:
+                    parts.append(str(text))
+        if parts:
+            return "".join(parts)
+
     choices = getattr(response, "choices", None) or []
     if not choices:
         raise RuntimeError("视觉模型没有返回 choices")
@@ -190,6 +251,14 @@ class _OpenAICompatibleVision:
         return _parse_json(_response_text(response))
 
 
+def _configured_output_tokens() -> int:
+    value = env_first("VISION_MAX_OUTPUT_TOKENS", default="4096")
+    try:
+        return max(256, int(value))
+    except ValueError:
+        return 4096
+
+
 class DeepSeekVisionProvider(_OpenAICompatibleVision):
     def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
         super().__init__(
@@ -222,6 +291,63 @@ class ArkVisionProvider(_OpenAICompatibleVision):
             model=selected_model,
             name="ark",
         )
+
+    def analyze(self, image_path: Path, prompt: str) -> dict[str, Any]:
+        """Analyze through Ark Responses + Files API by default.
+
+        ``responses_file`` follows Ark's recommended local-file workflow:
+        upload a local image, reference its ``file_id`` in an ``input_image``
+        content block, and read the Responses API text output. Set
+        ``ARK_VISION_TRANSPORT=chat_base64`` to use the legacy compatible Chat
+        API path when debugging an endpoint that does not expose Responses.
+        """
+
+        transport = env_first("ARK_VISION_TRANSPORT", default="responses_file").strip().lower()
+        if transport in {"chat", "chat_base64", "base64"}:
+            return super().analyze(image_path, prompt)
+        if transport not in {"responses_file", "file", "local_file"}:
+            raise RuntimeError(
+                "ARK_VISION_TRANSPORT 必须是 responses_file 或 chat_base64，"
+                f"当前为 {transport!r}"
+            )
+
+        with _prepared_local_image(image_path) as prepared_path:
+            # Ark currently accepts user_data/agent for Files API uploads.
+            # Keep this configurable because the allowed purpose set can vary
+            # by Ark product surface, but use the general image-input value by
+            # default instead of the OpenAI-only ``vision`` purpose.
+            purpose = env_first("ARK_FILE_PURPOSE", default="user_data")
+            uploaded = self._client.files.create(file=prepared_path, purpose=purpose)
+            file_id = getattr(uploaded, "id", None)
+            if not file_id and isinstance(uploaded, dict):
+                file_id = uploaded.get("id")
+            if not file_id:
+                raise RuntimeError("Ark Files API 上传成功但没有返回 file_id")
+
+            extra_body: dict[str, Any] = {}
+            thinking = env_first("ARK_VISION_THINKING", default="disabled").strip().lower()
+            if thinking in {"enabled", "enable", "on", "true", "1"}:
+                extra_body["thinking"] = {"type": "enabled"}
+            elif thinking in {"disabled", "disable", "off", "false", "0"}:
+                extra_body["thinking"] = {"type": "disabled"}
+
+            response = self._client.responses.create(
+                model=self.model,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_image", "file_id": file_id, "detail": "high"},
+                            {"type": "input_text", "text": prompt},
+                        ],
+                    }
+                ],
+                max_output_tokens=_configured_output_tokens(),
+                temperature=0,
+                text={"format": {"type": "json_object"}},
+                extra_body=extra_body or None,
+            )
+        return _parse_json(_response_text(response))
 
 
 class CallableVisionProvider:

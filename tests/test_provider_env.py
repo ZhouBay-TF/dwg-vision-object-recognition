@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import io
+from pathlib import Path
+from types import SimpleNamespace
 
 from PIL import Image
 
@@ -55,3 +57,46 @@ def test_vision_payload_downscales_cad_render_in_memory(tmp_path, monkeypatch) -
     with Image.open(io.BytesIO(base64.b64decode(encoded))) as image:
         assert image.size == (1600, 909)
         assert data_url.startswith("data:image/jpeg;base64,")
+
+
+def test_ark_responses_file_transport_uploads_local_path_and_uses_file_id(tmp_path, monkeypatch) -> None:
+    source_path = tmp_path / "scene.png"
+    Image.new("RGB", (640, 360), "white").save(source_path)
+    monkeypatch.setenv("ARK_API_KEY", "ark-test-key")
+    monkeypatch.setenv("ARK_VISION_MODEL", "doubao-seed-evolving")
+    monkeypatch.setenv("ARK_VISION_TRANSPORT", "responses_file")
+
+    provider = ArkVisionProvider()
+
+    class FakeFiles:
+        def __init__(self) -> None:
+            self.file = None
+            self.purpose = None
+
+        def create(self, *, file, purpose):
+            self.file = file
+            self.purpose = purpose
+            assert Path(file).resolve() == source_path.resolve()
+            return SimpleNamespace(id="file-test-001")
+
+    class FakeResponses:
+        def __init__(self) -> None:
+            self.kwargs = None
+
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(output_text='{"detections": [], "notes": "ok"}')
+
+    fake_files = FakeFiles()
+    fake_responses = FakeResponses()
+    provider._client.files = fake_files
+    provider._client.responses = fake_responses
+
+    result = provider.analyze(source_path, "请只返回 JSON")
+
+    assert result == {"detections": [], "notes": "ok"}
+    assert fake_files.purpose == "user_data"
+    content = fake_responses.kwargs["input"][0]["content"]
+    assert content[0] == {"type": "input_image", "file_id": "file-test-001", "detail": "high"}
+    assert content[1] == {"type": "input_text", "text": "请只返回 JSON"}
+    assert fake_responses.kwargs["model"] == "doubao-seed-evolving"
