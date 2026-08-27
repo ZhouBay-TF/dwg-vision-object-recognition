@@ -374,6 +374,8 @@ def run_full_pipeline(
                 graph,
                 scene_render_contexts.get(scene["scene_id"], {}).get("path"),
                 output_dir / "comparison" / scene["scene_id"],
+                sympoint_result=sympoint_result,
+                visual_observations=(scene_trace or {}).get("observations", []),
             )
         except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
             # Comparison is an audit aid; it must not erase the machine-readable

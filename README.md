@@ -100,6 +100,8 @@ python -m dwg_vision.cli detect `
 - `comparison/<scene_id>/detection_overlay.png`：Scene Graph 对象叠加图；
 - `comparison/<scene_id>/native_text_overlay.png`：原生文字证据位置图；
 - `comparison/<scene_id>/side_by_side.png`：原图与识别叠加图并排比对；
+- `comparison/<scene_id>/source_layers.png`：三联审计图，依次标注 SymPointV2、视觉模型证据和最终 Scene Graph；
+- `comparison/<scene_id>/source_sympointv2.png`、`source_visual_model.png`、`source_final_scene_graph.png`：三层单独高清图，便于放大核对；
 - `run_report.json`：本次运行的 CAD、SymPointV2、校验和可视化统计报告。
 
 ## AutoCAD 2020-2027 复现

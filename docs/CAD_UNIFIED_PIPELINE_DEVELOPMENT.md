@@ -521,6 +521,8 @@ python -m dwg_vision.cli full `
 
 视觉模型图片传输约定：Ark 生产默认使用 `ARK_VISION_TRANSPORT=responses_file`，将本地 Scene/ROI 图片经 Files API 上传后，通过 Responses API 的 `input_image.file_id` 传入；超过 `VISION_MAX_IMAGE_DIM` 的图片仅在临时目录中缩放为 JPEG，原始图不改写。当前 Ark Files API 的 `purpose` 默认是 `user_data`，可由 `ARK_FILE_PURPOSE` 覆盖。只有在接口排障或兼容旧部署时才使用 `ARK_VISION_TRANSPORT=chat_base64`。Files API 的上传和 Responses API 的图片引用由 `dwg_vision.providers.ArkVisionProvider` 封装，Agent、Scene Graph 和下游融合模块只看到统一的 `dict` 结果，不感知传输方式。
 
+`comparison/<scene_id>/source_layers.png` 三联图固定展示 `SymPointV2 原始识别 -> 视觉模型证据 -> 最终 Scene Graph`，并另外输出 `source_sympointv2.png`、`source_visual_model.png`、`source_final_scene_graph.png` 三个单层高清 PNG。这些是来源审计标注，不等同于自动证明“识别正确”，最终正确性仍需结合原图、原生文字和校验结果复核。
+
 #### SymPointV2 的 Scene 裁剪与 SVG→JSON
 
 SymPointV2 不接收整张 DWG 的总 SVG。AutoCAD 原生解析得到图框后，`SceneBuilder` 对每个图框建立独立的局部坐标系，并只把该图框内的几何写入：
