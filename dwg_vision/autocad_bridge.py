@@ -431,9 +431,22 @@ def export_with_autocad(
     application = None
     last_error: Exception | None = None
     selected_prog_id = candidates[0]
+    connection_mode = "new_instance"
     for candidate in candidates:
+        # Reuse an already running AutoCAD first.  Dispatch can launch a
+        # second GUI process and wait indefinitely while the first process is
+        # showing a startup/licensing/modal dialog.
         try:
-            application = win32com.client.Dispatch(candidate)
+            get_active = getattr(win32com.client, "GetActiveObject", None)
+            if callable(get_active):
+                try:
+                    application = get_active(candidate)
+                    connection_mode = "active_instance"
+                except Exception:
+                    application = None
+            if application is None:
+                application = win32com.client.Dispatch(candidate)
+                connection_mode = "new_instance"
             selected_prog_id = candidate
             break
         except Exception as exc:  # pragma: no cover - depends on local AutoCAD
@@ -461,6 +474,7 @@ def export_with_autocad(
             "version": application_version,
             "prog_id": selected_prog_id,
             "api": "ActiveX/COM",
+            "connection_mode": connection_mode,
             "supported_major_releases": [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027],
         }
     finally:
