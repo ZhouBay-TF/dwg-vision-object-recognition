@@ -14,6 +14,8 @@ from .pipeline import _load_dotenv, build_providers
 from .render import prepare_visual_source, render_svg_to_png
 from .scene import build_scene_bundle
 from .scene_graph import build_scene_graph
+from .cad_reasoning import build_native_evidence_catalog, apply_cad_reasoning, native_candidates_for_scene
+from .candidate_discovery import build_open_world_candidates
 from .sympoint_client import SymPointRemoteClient
 from .sympoint_audit import audit_sympoint_input, audit_sympoint_output
 from .visual_review_agent import VisualReviewAgent
@@ -60,6 +62,48 @@ def _offline_sympoint_result(scene: dict[str, Any]) -> dict[str, Any]:
         "semantic_by_primitive": semantic,
         "provenance": {"model": "offline-contract", "runtime_version": "local"},
     }
+
+
+def _legacy_candidate_objects(scene: dict[str, Any], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Materialize recovered CAD candidates without inventing geometry.
+
+    This is intentionally kept in the main orchestrator: the old path lost
+    these candidates before Scene Graph construction, which made native door,
+    window and fixture evidence disappear whenever SYP missed a symbol.
+    """
+    objects: list[dict[str, Any]] = []
+    for index, candidate in enumerate(candidates):
+        bbox = candidate.get("bbox_world")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            continue
+        object_type = str(candidate.get("type") or "unknown")
+        subtype = str(candidate.get("subtype") or object_type)
+        # T3/exploded drawings frequently retain the door-library name while
+        # their coarse native layer says WINDOW.  The named CAD library is the
+        # stronger evidence and must not make a real door disappear as a
+        # cyan window candidate.
+        if "dorlib" in subtype.lower():
+            object_type = "door"
+        if object_type == "unknown":
+            continue
+        primitive_ids = [str(item) for item in candidate.get("primitive_ids") or []]
+        objects.append({
+            "object_id": f"obj_{scene['scene_id']}_native_{index:04d}",
+            "scene_id": scene["scene_id"],
+            "type": object_type,
+            "subtype": subtype,
+            "geometry_mode": "area",
+            "geometry_world": {"bbox": [float(item) for item in bbox], "polygon": []},
+            "source_handles": [str(candidate["handle"])] if candidate.get("handle") else [],
+            "source_entity_ids": [],
+            "primitive_ids": primitive_ids,
+            "confidence": float(candidate.get("confidence") or 0.0),
+            "status": str(candidate.get("status") or "review"),
+            "semantic_source": str(candidate.get("semantic_source") or "native_cad_metadata"),
+            "evidence_refs": [str(item) for item in candidate.get("evidence_refs") or []],
+            "evidence": dict(candidate.get("evidence") or {}),
+        })
+    return objects
 
 
 def _render_context(
@@ -160,6 +204,12 @@ def run_full_pipeline(
     visual_max_attempts_per_object: int = 3,
     visual_max_attempts_per_scene: int = 30,
     fusion_provider_name: str = "",
+    sympoint_tile_size: float | None = None,
+    sympoint_tile_overlap: float = 0.0,
+    sympoint_tile_min_primitives: int = 0,
+    generate_comparison: bool = True,
+    run_scene_overview: bool = True,
+    legacy_candidate_mode: bool = False,
 ) -> dict[str, Any]:
     """Run the complete local orchestration path.
 
@@ -192,24 +242,27 @@ def run_full_pipeline(
         raise RuntimeError("DWG 主流程需要 --autocad，或使用 --raw-json 提供 AutoCAD 导出的 dwg_raw JSON")
 
     bundle_dir = output_dir / "bundle"
-    bundle_path = build_scene_bundle(raw, bundle_dir, source_path=input_path, job_id=selected_job_id)
+    bundle_path = build_scene_bundle(
+        raw,
+        bundle_dir,
+        source_path=input_path,
+        job_id=selected_job_id,
+        tile_size=sympoint_tile_size,
+        tile_overlap=sympoint_tile_overlap,
+        tile_min_primitives=sympoint_tile_min_primitives,
+    )
     manifest = _load_json(bundle_dir / "job_manifest.json")
     sympoint_audit: dict[str, dict[str, Any]] = {}
 
-    # Render every Scene before model calls.  The Scene image is already
-    # cropped to one drawing frame, so the first vision call can establish a
-    # stable global prior for that frame before SymPointV2 and ROI review.
-    render_path, render_manifest, render_error = _render_context(
-        input_path,
-        raw,
-        output_dir,
-        oda_exe=oda_exe,
-        libredwg_exe=libredwg_exe,
-        oda_version=oda_version,
-        layout=layout,
-        dpi=dpi,
-        raster_max_dimension=raster_max_dimension,
-    )
+    # The source-wide raster is only evidence for the optional visual model.
+    # Creating it for a vector-only SYP job can allocate hundreds of MB before
+    # any focused tile is sent to inference, so skip it unless it is consumed.
+    # Visual overview and ROI review both consume the focused per-Scene
+    # render below.  A source-wide raster is neither consumed nor safe for
+    # large drawings, where it can allocate hundreds of MB before inference.
+    render_path: Path | None = None
+    render_manifest: dict[str, Any] = {}
+    render_error: str | None = None
     scene_render_contexts: dict[str, dict[str, Any]] = {}
     for scene_item in manifest["scenes"]:
         scene_dir = bundle_dir / scene_item["path"]
@@ -252,7 +305,7 @@ def run_full_pipeline(
     # result is context/evidence only; it cannot create objects or mutate CAD
     # geometry and native text remains authoritative downstream.
     scene_overviews: dict[str, dict[str, Any] | None] = {}
-    if visual_agent is not None:
+    if visual_agent is not None and run_scene_overview:
         for scene_item in manifest["scenes"]:
             scene_dir = bundle_dir / scene_item["path"]
             scene = _load_json(scene_dir / "scene.json")
@@ -327,6 +380,38 @@ def run_full_pipeline(
             scene_overview=scene_overview,
             job_id=selected_job_id,
         )
+        legacy_trace: dict[str, Any] | None = None
+        if legacy_candidate_mode:
+            # CAD evidence is evaluated against the original raw drawing, and
+            # only existing primitive/handle geometry can become an object.
+            catalog = build_native_evidence_catalog(raw)
+            semantic_catalog = apply_cad_reasoning(catalog, None, provider="native_baseline")
+            native_candidates = native_candidates_for_scene(scene, catalog, semantic_catalog)
+            gap_candidates = build_open_world_candidates(
+                scene,
+                sympoint_result,
+                native_candidates=native_candidates,
+                max_closed_region_candidates=96,
+            )
+            native_primitive_ids = {
+                primitive_id
+                for candidate in native_candidates
+                for primitive_id in candidate.get("primitive_ids") or []
+            }
+            # A native candidate is geometry-authoritative.  Do not render a
+            # second SYP object when it refers to exactly the same primitive;
+            # this is particularly important for wall stuff classes.
+            graph_seed["objects"] = _legacy_candidate_objects(scene, native_candidates) + [
+                item for item in graph_seed["objects"]
+                if not set(item.get("primitive_ids") or []).intersection(native_primitive_ids)
+            ]
+            graph_seed.setdefault("provenance", {})["legacy_candidate_recovery"] = {
+                "enabled": True,
+                "native_candidate_count": len(native_candidates),
+                "open_world_candidate_count": len(gap_candidates),
+                "cad_reasoning": "native_metadata_baseline",
+            }
+            legacy_trace = graph_seed["provenance"]["legacy_candidate_recovery"]
         scene_trace: dict[str, Any] | None = None
         if visual_agent is not None:
             scene_trace = visual_agent.review(
@@ -366,6 +451,8 @@ def run_full_pipeline(
             except Exception as exc:  # optional enhancement must not erase baseline output
                 fusion_metadata["status"] = "failed"
                 fusion_metadata.setdefault("errors", []).append({"scene_id": scene["scene_id"], "error": str(exc)})
+        if legacy_trace is not None:
+            graph.setdefault("provenance", {})["legacy_candidate_recovery"] = legacy_trace
         scene_output = output_dir / "scenes" / scene["scene_id"]
         scene_output.mkdir(parents=True, exist_ok=True)
         (scene_output / "scene_graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -375,23 +462,24 @@ def run_full_pipeline(
         if scene_trace is not None:
             (scene_output / "visual_review_trace.json").write_text(json.dumps(scene_trace, ensure_ascii=False, indent=2), encoding="utf-8")
             vision_trace["scenes"].setdefault(scene["scene_id"], {})["candidate_review"] = scene_trace
-        try:
-            comparison_artifacts[scene["scene_id"]] = generate_scene_comparison(
-                scene,
-                graph,
-                scene_render_contexts.get(scene["scene_id"], {}).get("path"),
-                output_dir / "comparison" / scene["scene_id"],
-                sympoint_result=sympoint_result,
-                visual_observations=(scene_trace or {}).get("observations", []),
-            )
-        except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
-            # Comparison is an audit aid; it must not erase the machine-readable
-            # detection result when an optional raster dependency is unavailable.
-            comparison_artifacts[scene["scene_id"]] = {
-                "status": "failed",
-                "scene_id": scene["scene_id"],
-                "error": str(exc),
-            }
+        if generate_comparison:
+            try:
+                comparison_artifacts[scene["scene_id"]] = generate_scene_comparison(
+                    scene,
+                    graph,
+                    scene_render_contexts.get(scene["scene_id"], {}).get("path"),
+                    output_dir / "comparison" / scene["scene_id"],
+                    sympoint_result=sympoint_result,
+                    visual_observations=(scene_trace or {}).get("observations", []),
+                )
+            except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
+                # Comparison is an audit aid; it must not erase the machine-readable
+                # detection result when an optional raster dependency is unavailable.
+                comparison_artifacts[scene["scene_id"]] = {
+                    "status": "failed",
+                    "scene_id": scene["scene_id"],
+                    "error": str(exc),
+                }
         graphs.append(graph)
 
     validation = {

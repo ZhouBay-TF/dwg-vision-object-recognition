@@ -55,7 +55,7 @@ def _local_to_pixel(point: Any, scene: dict[str, Any], image_size: tuple[int, in
     local_height = max(1e-9, float(scene["local_bounds"][3]))
     return (
         _clamp(float(point[0]) / local_width * width, 0, width - 1),
-        _clamp(float(point[1]) / local_height * height, 0, height - 1),
+        _clamp(height - float(point[1]) / local_height * height, 0, height - 1),
     )
 
 
@@ -65,9 +65,9 @@ def _world_to_pixel(box: Any, scene: dict[str, Any], image_size: tuple[int, int]
     sx = width / max(1e-9, world[2] - world[0])
     sy = height / max(1e-9, world[3] - world[1])
     x1 = _clamp((float(box[0]) - world[0]) * sx, 0, width - 1)
-    y1 = _clamp((float(box[1]) - world[1]) * sy, 0, height - 1)
+    y1 = _clamp((world[3] - float(box[1])) * sy, 0, height - 1)
     x2 = _clamp((float(box[2]) - world[0]) * sx, 0, width - 1)
-    y2 = _clamp((float(box[3]) - world[1]) * sy, 0, height - 1)
+    y2 = _clamp((world[3] - float(box[3])) * sy, 0, height - 1)
     return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
 
 
@@ -155,33 +155,34 @@ def _draw_object_geometry(
     *,
     width: int = 3,
 ) -> tuple[int, int, int, int]:
-    """Draw one final object and return its pixel bounds."""
+    """Draw one object from its original CAD primitives, never a proxy box."""
 
     bbox = ((item.get("geometry_world") or {}).get("bbox") or [0, 0, 0, 0])
-    mode = str(item.get("geometry_mode") or "area")
-    if mode == "linear" or abs(float(bbox[2]) - float(bbox[0])) < 1e-7 or abs(float(bbox[3]) - float(bbox[1])) < 1e-7:
-        points: list[tuple[int, int]] = []
-        for primitive_id in item.get("primitive_ids") or []:
-            primitive = primitives.get(str(primitive_id))
-            if primitive:
-                _draw_primitive(draw, primitive, scene, image_size, color)
-                points.extend(_primitive_pixel_points(primitive, scene, image_size))
-        if points:
-            return _points_bbox(points)
-        return _world_to_pixel(bbox, scene, image_size)
+    primitive_items = [
+        primitives[str(primitive_id)]
+        for primitive_id in item.get("primitive_ids") or []
+        if str(primitive_id) in primitives
+    ]
+    # Exploded DorLib swing doors contain four frame segments plus an arc.
+    # The frame segments look like a coloured rectangle at plan scale; the
+    # arc is the actual door-swing signal, so retain it alone for this view.
+    if (
+        str(item.get("type") or "") == "door"
+        and "dorlib" in str(item.get("subtype") or "").lower()
+    ):
+        primitive_items = [item for item in primitive_items if item.get("command") == "arc"]
 
-    left, top, right, bottom = _world_to_pixel(bbox, scene, image_size)
-    draw.rounded_rectangle((left, top, right, bottom), radius=4, outline=color, width=width)
-    polygon = (item.get("geometry_world") or {}).get("polygon") or []
-    if len(polygon) >= 3:
-        polygon_points = [
-            _world_to_pixel([point[0], point[1], point[0], point[1]], scene, image_size)[:2]
-            for point in polygon
-        ]
-        polygon_points.append(polygon_points[0])
-        draw.line(polygon_points, fill=color, width=width, joint="curve")
-    return left, top, right, bottom
+    primitive_points: list[tuple[int, int]] = []
+    for primitive in primitive_items:
+        _draw_primitive(draw, primitive, scene, image_size, color)
+        primitive_points.extend(_primitive_pixel_points(primitive, scene, image_size))
+    if primitive_points:
+        return _points_bbox(primitive_points)
 
+    # Delivery overlays must trace source CAD geometry only.  A semantic
+    # record without any surviving source primitive is retained in JSON for
+    # audit, but deliberately has no visible bbox/rectangle substitute.
+    return _world_to_pixel(bbox, scene, image_size)
 
 def _primitive_pixel_points(primitive: dict[str, Any], scene: dict[str, Any], image_size: tuple[int, int]) -> list[tuple[int, int]]:
     points = [_local_to_pixel(point, scene, image_size) for point in primitive.get("points_local", [])]
@@ -346,20 +347,9 @@ def _draw_source_layers(
             original.size,
             primitives,
             (*SOURCE_COLORS["final"], 225),
-            width=4,
+            width=6,
         )
         final_count += 1
-        if item.get("type") != "wall" or "VLM" in _source_tags(item) or item.get("status") == "review":
-            tags = "+".join(_source_tags(item))
-            label = f"[{tags}] {item.get('type')}/{item.get('subtype') or 'unknown'}"
-            final_draw.text(
-                (left + 3, max(0, top - 23)),
-                label,
-                fill=(*SOURCE_COLORS["final"], 255),
-                font=final_font,
-                stroke_width=1,
-                stroke_fill=(255, 255, 255, 220),
-            )
 
     panel_specs = (
         ("sympointv2", sympoint_panel, "① SymPointV2 原始识别", sympoint_count),
@@ -447,7 +437,6 @@ def generate_scene_comparison(
     counts = Counter(str(item.get("type") or "unknown") for item in objects)
     subtype_counts = Counter(str(item.get("subtype") or "unknown") for item in objects)
     review_count = sum(1 for item in objects if item.get("status") == "review")
-    label_font = _font(max(14, min(24, image_size[0] // 500)))
 
     for item in objects:
         kind = str(item.get("type") or "unknown")
@@ -460,14 +449,12 @@ def generate_scene_comparison(
             image_size,
             primitives,
             color,
-            width=3,
+            width=6,
         )
-        if kind != "wall" or right - left > 30:
-            source_tags = "+".join(_source_tags(item))
-            label = f"[{source_tags}] {kind}/{item.get('subtype') or 'unknown'} {item.get('confidence', 0):.2f}"
-            draw.text((left + 3, max(0, top - 24)), label, fill=(*rgb, 255), font=label_font, stroke_width=1, stroke_fill=(255, 255, 255, 220))
 
-    _draw_legend(draw, image_size, counts, title=f"Scene {scene.get('scene_id')} · {len(objects)} objects")
+    # Keep the delivery image geometry-only.  Counts remain in the JSON and
+    # the colour mapping is stable in TYPE_COLORS, but no legend competes
+    # with small bathroom and window symbols.
 
     text_overlay = original.convert("RGBA")
     text_draw = ImageDraw.Draw(text_overlay, "RGBA")

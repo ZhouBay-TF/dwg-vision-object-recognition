@@ -137,7 +137,35 @@ def _sampled_points(entity: dict[str, Any], bbox_world: list[float], origin: tup
     points = _points_for_entity(entity, bbox_world, origin)
     command = _command_for_entity(entity)
     dimensions = dict(entity.get("dimensions") or {})
-    if command not in {"arc", "ellipse"} or len(points) != 1:
+    if command not in {"arc", "ellipse"}:
+        return points
+    # Exploded .NET ARC records sometimes carry a bbox rectangle as their
+    # fallback polygon.  That rectangle is not curve geometry.  Prefer the
+    # authoritative WCS centre/endpoints and normal whenever they exist.
+    if command == "arc":
+        center = dimensions.get("center_world")
+        start_point = dimensions.get("start_point_world")
+        end_point = dimensions.get("end_point_world")
+        if (
+            isinstance(center, (list, tuple)) and len(center) >= 2
+            and isinstance(start_point, (list, tuple)) and len(start_point) >= 2
+            and isinstance(end_point, (list, tuple)) and len(end_point) >= 2
+        ):
+            center_x, center_y = float(center[0]), float(center[1])
+            start_angle = math.atan2(float(start_point[1]) - center_y, float(start_point[0]) - center_x)
+            end_angle = math.atan2(float(end_point[1]) - center_y, float(end_point[0]) - center_x)
+            span = float(dimensions.get("total_angle") or 0.0)
+            if span <= 1e-9:
+                span = abs((end_angle - start_angle + math.pi) % (2.0 * math.pi) - math.pi)
+            normal = dimensions.get("normal_world") or []
+            direction = -1.0 if len(normal) >= 3 and float(normal[2]) < 0.0 else 1.0
+            radius = math.hypot(float(start_point[0]) - center_x, float(start_point[1]) - center_y)
+            count = max(8, min(32, int(abs(span) / (math.pi / 12.0)) + 1))
+            return [[
+                center_x + radius * math.cos(start_angle + direction * span * index / (count - 1)) - origin[0],
+                center_y + radius * math.sin(start_angle + direction * span * index / (count - 1)) - origin[1],
+            ] for index in range(count)]
+    if len(points) != 1:
         return points
     center_world = [
         (bbox_world[0] + bbox_world[2]) / 2.0,
@@ -324,6 +352,9 @@ def scene_to_svg(scene: dict[str, Any], output_path: Path) -> Path:
     validate_scene(scene)
     width = max(1.0, float(scene["local_bounds"][2]))
     height = max(1.0, float(scene["local_bounds"][3]))
+    # DWG model space is Y-up whereas SVG/raster space is Y-down.
+    def svg_y(value: float) -> float:
+        return height - float(value)
     root = ET.Element("svg", {
         "version": "1.1",
         "viewBox": f"0 0 {width:g} {height:g}",
@@ -342,10 +373,17 @@ def scene_to_svg(scene: dict[str, Any], output_path: Path) -> Path:
             group = ET.SubElement(root, "g", {"data-layer": layer_name})
             layer_groups[layer_name] = group
         points = primitive["points_local"]
+        # AutoCAD can expose zero-length construction fragments (including
+        # exploded anonymous-block remnants).  They have no drawable CAD
+        # geometry but svgpathtools rejects a Path made solely from them.
+        if primitive["command"] not in {"circle", "ellipse"} and (
+            len(points) < 2 or all(point == points[0] for point in points[1:])
+        ):
+            continue
         if primitive["command"] == "circle":
             box = primitive["bbox_local"]
             center_x = (box[0] + box[2]) / 2.0
-            center_y = (box[1] + box[3]) / 2.0
+            center_y = svg_y((box[1] + box[3]) / 2.0)
             radius = max(abs(box[2] - box[0]), abs(box[3] - box[1])) / 2.0
             element = ET.SubElement(group, "circle", {
                 "cx": f"{center_x:g}", "cy": f"{center_y:g}", "r": f"{radius:g}",
@@ -354,13 +392,13 @@ def scene_to_svg(scene: dict[str, Any], output_path: Path) -> Path:
             box = primitive["bbox_local"]
             element = ET.SubElement(group, "ellipse", {
                 "cx": f"{(box[0] + box[2]) / 2.0:g}",
-                "cy": f"{(box[1] + box[3]) / 2.0:g}",
+                "cy": f"{svg_y((box[1] + box[3]) / 2.0):g}",
                 "rx": f"{max(0.01, (box[2] - box[0]) / 2.0):g}",
                 "ry": f"{max(0.01, (box[3] - box[1]) / 2.0):g}",
             })
         else:
-            commands = [f"M {points[0][0]:g},{points[0][1]:g}"]
-            commands.extend(f"L {point[0]:g},{point[1]:g}" for point in points[1:])
+            commands = [f"M {points[0][0]:g},{svg_y(points[0][1]):g}"]
+            commands.extend(f"L {point[0]:g},{svg_y(point[1]):g}" for point in points[1:])
             element = ET.SubElement(group, "path", {"d": " ".join(commands)})
         element.set("fill", "none")
         element.set("stroke", _svg_color(primitive.get("color")))
@@ -382,7 +420,7 @@ def scene_to_svg(scene: dict[str, Any], output_path: Path) -> Path:
         font_size = max(0.1, float(text.get("height") or text.get("style", {}).get("height") or max(1.0, bbox[3] - bbox[1])))
         label = ET.SubElement(annotation_group, "text", {
             "x": f"{float(position[0]) - float(origin[0]):g}",
-            "y": f"{float(position[1]) - float(origin[1]):g}",
+            "y": f"{svg_y(float(position[1]) - float(origin[1])):g}",
             "font-size": f"{font_size:g}",
             "fill": "rgb(40,40,40)",
             "data-text-id": str(text.get("text_id") or ""),
@@ -400,6 +438,9 @@ def build_scene_bundle(
     source_path: Path | None = None,
     job_id: str = "job_local_0001",
     margin: float = 0.0,
+    tile_size: float | None = None,
+    tile_overlap: float = 0.0,
+    tile_min_primitives: int = 0,
 ) -> Path:
     """Build an API-compatible Bundle ZIP from AutoCAD raw JSON."""
     validate_raw(raw)
@@ -409,7 +450,47 @@ def build_scene_bundle(
     scenes_root = output_dir / "scenes"
     scenes_root.mkdir(parents=True, exist_ok=True)
     manifest_scenes: list[dict[str, Any]] = []
-    for frame in detect_frames(raw, margin=margin):
+    frames = detect_frames(raw, margin=margin)
+    if tile_size is not None:
+        if tile_size <= 0:
+            raise ValueError("tile_size must be positive")
+        if tile_overlap < 0 or tile_overlap >= tile_size:
+            raise ValueError("tile_overlap must be non-negative and smaller than tile_size")
+        if tile_min_primitives < 0:
+            raise ValueError("tile_min_primitives must be non-negative")
+        step = tile_size - tile_overlap
+        tiled_frames: list[dict[str, Any]] = []
+        source_entities = _geometry_entities(raw)
+        for frame in frames:
+            left, bottom, right, top = require_bbox(frame["world_bbox"], "frame.world_bbox")
+            y = bottom
+            row = 0
+            while y < top:
+                x = left
+                column = 0
+                while x < right:
+                    tile_right = min(right, x + tile_size)
+                    tile_top = min(top, y + tile_size)
+                    tile_bounds = [x, y, tile_right, tile_top]
+                    primitive_count = sum(
+                        1
+                        for entity in source_entities
+                        if isinstance(entity, dict) and not entity.get("is_frame")
+                        and _intersects(tile_bounds, _raw_entity_bbox(entity))
+                    )
+                    if primitive_count >= tile_min_primitives:
+                        tiled_frames.append({
+                        **frame,
+                        "scene_id": f"{frame['scene_id']}_tile_r{row:02d}_c{column:02d}",
+                        "frame_type": "sympoint_focus_tile",
+                        "world_bbox": tile_bounds,
+                        })
+                    x += step
+                    column += 1
+                y += step
+                row += 1
+        frames = tiled_frames
+    for frame in frames:
         scene = build_scene(raw, frame)
         scene_dir = scenes_root / scene["scene_id"]
         scene_dir.mkdir(parents=True, exist_ok=True)

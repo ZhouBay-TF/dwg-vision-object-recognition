@@ -1,5 +1,7 @@
 # DWG Vision：DWG 全景对象识别
 
+面向仓库维护的当前代码架构、入口、数据边界和已知接线状态见：[当前项目架构](docs/CURRENT_ARCHITECTURE.md)。
+
 当前最新整体开发规约见：[CAD 全景识别统一架构开发总规约](docs/CAD_UNIFIED_PIPELINE_DEVELOPMENT.md)。该文档是本地 DWG、AutoCAD 2020-2027、原生文字、SymPointV2 云端推理、受限视觉复核 Agent、LLM 证据融合和最终 Scene Graph 的统一入口；下面两份文档分别补充整体架构细节和云端接口细节。
 
 当前主架构严格遵守总规约中的固定流程：`DWG -> AutoCAD 原生解析 -> 图框/Scene 分解 -> CAD 几何与拓扑 + 原生文字 + 高清渲染 -> 每个 Scene 一次全图视觉概览 -> SymPointV2 稳定候选 -> 受限视觉复核 Agent -> 多视角证据集合 -> Scene Graph 融合 -> 规则校验与人工复核 -> 最终 JSON`。
@@ -13,6 +15,9 @@ SymPointV2 云端接口、AutoDL 无公共端口部署、DWG 多图框拆分、S
 输出对象类型为：`wall`、`window`、`door`、`furniture`。每个对象同时保留边界框、可选多边形、旋转角、尺寸参数、置信度、模型/图元来源、可复核证据和校验结果。像素坐标使用左上角原点；如果 DXF/AutoCAD 几何证据可用，实体还会带 `bbox_world`，并通过图纸范围映射到像素坐标。
 
 ## 全景识别
+
+仓库附带可公开复现的示例图纸 `examples/平面深化简化.dwg`。其余项目 DWG、金标准
+与运行结果均只保留本地，避免误传业务数据。
 
 安装依赖：
 

@@ -25,11 +25,15 @@ VIEW_MARGIN_FACTORS = {
 
 def _scene_overview_prompt(scene: dict[str, Any], texts: list[dict[str, Any]]) -> str:
     local_bounds = scene.get("local_bounds") or [0, 0, 0, 0]
+    # A dense CAD tile can contain hundreds of dimension/annotation strings.
+    # Keep the overview request bounded for OpenAI-compatible gateways; the
+    # full native text evidence remains available to downstream rules.
+    prompt_texts = texts[:40]
     text_lines = "\n".join(
-        f"- {item.get('text_id', '')}: {item.get('text', '')} [{item.get('role', 'general_annotation')}]"
-        for item in texts[:200]
+        f"- {item.get('text_id', '')}: {str(item.get('text', ''))[:80]} [{item.get('role', 'general_annotation')}]"
+        for item in prompt_texts
     ) or "（当前 Scene 没有可读原生文字）"
-    omitted = max(0, len(texts) - 200)
+    omitted = max(0, len(texts) - len(prompt_texts))
     if omitted:
         text_lines += f"\n- 另有 {omitted} 条文字未展开，请以图像为准。"
     return f"""你是建筑 CAD 图框级视觉理解器。当前图片已经是一个独立图框 Scene 的完整高清图，不是整张 DWG 拼图。

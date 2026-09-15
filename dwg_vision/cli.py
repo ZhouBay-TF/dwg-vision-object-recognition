@@ -76,6 +76,12 @@ def _add_full_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dpi", type=int, default=300)
     parser.add_argument("--raster-max-dimension", type=int, default=16000)
     parser.add_argument("--job-id")
+    parser.add_argument("--sympoint-tile-size", type=float, help="按 CAD 世界坐标切分为 SYP 局部识别块")
+    parser.add_argument("--sympoint-tile-overlap", type=float, default=0.0, help="SYP 分块重叠宽度")
+    parser.add_argument("--sympoint-tile-min-primitives", type=int, default=0, help="忽略图元过少的空白 SYP 分块")
+    parser.add_argument("--skip-comparison", action="store_true", help="跳过批量 PNG 对比图，仅输出检测 JSON")
+    parser.add_argument("--skip-visual-overview", action="store_true", help="跳过全 Scene 视觉概览，仅复核 SYP 候选")
+    parser.add_argument("--legacy-candidate-mode", action="store_true", help="恢复原生 CAD 候选发现与闭合区域候选链")
     parser.add_argument("--visual-max-attempts-per-object", type=int, default=3)
     parser.add_argument("--visual-max-attempts-per-scene", type=int, default=30)
 
@@ -208,6 +214,12 @@ def main() -> None:
                 visual_max_attempts_per_object=args.visual_max_attempts_per_object,
                 visual_max_attempts_per_scene=args.visual_max_attempts_per_scene,
                 fusion_provider_name=args.fusion_provider,
+                sympoint_tile_size=args.sympoint_tile_size,
+                sympoint_tile_overlap=args.sympoint_tile_overlap,
+                sympoint_tile_min_primitives=args.sympoint_tile_min_primitives,
+                generate_comparison=not args.skip_comparison,
+                run_scene_overview=not args.skip_visual_overview,
+                legacy_candidate_mode=args.legacy_candidate_mode,
             )
             print(result["output_json"])
             print(json.dumps({

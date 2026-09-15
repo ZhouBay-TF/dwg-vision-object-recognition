@@ -1,12 +1,24 @@
 .env
+gpt.json
 .venv/
 __pycache__/
+.pytest_cache/
 *.py[cod]
 runs/
+gold/
+.rollback_backup_before_tianzheng_20260912/
 *.dwg
 *.dxf
+!examples/
+!examples/平面深化简化.dwg
 *.bak
 *.sv$.dwg
+*.dwl
+*.dwl2
+*.err
+api.*.json
+Codex 图像*.png
+autoCAD2027Ai助手聊天记录-2026-09-01.md
 runs/gemini_edit/
 autocad_2026/bin/
 autocad_2026/obj/
